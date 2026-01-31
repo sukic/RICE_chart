@@ -9,11 +9,11 @@ This is a simple, local web application to visualize data from a CSV file using 
 
 ### 2. Prepare Your Data
 - Make sure your data file is named `ideas_rice.csv` and is located in the same directory as this README file.
-- The CSV file must contain at least the following columns: `Key`, `Summary`, `Effort_2`, `Reach_2`, `Impact_2`, `Confidence_2`, `Availability`, `Impact Scope`, `Value Direction`, `OKRs impact`.
+- The CSV file must contain at least the following columns: `Key`, `Summary`, `Status`, `Product`, `Effort_2`, `Reach_2`, `Impact_2`, `Confidence_2`, `Availability`, `Impact Scope`, `Value Direction`, `OKRs impact`.
 
 ### 3. Run the Application
 - Open your terminal or command prompt.
-- Navigate to this directory (`rice-chart-app`).
+- Navigate to this directory (`RICE_chart`).
 - Run the following command:
   ```bash
   python3 start_server.py
