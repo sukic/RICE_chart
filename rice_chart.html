@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive RICE Chart</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/slim-select/2.8.2/slimselect.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/slim-select/2.8.2/slimselect.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 20px; background-color: #f4f7f6; color: #333; }
+        h1, h2 { text-align: center; color: #2c3e50; }
+        .controls { display: flex; justify-content: center; align-items: flex-end; gap: 20px; margin-bottom: 25px; flex-wrap: wrap; }
+        .filters { display: flex; gap: 20px; flex-wrap: wrap; }
+        .filter-group { display: flex; flex-direction: column; }
+        .filter-group label { margin-bottom: 5px; font-weight: bold; font-size: 0.9em; color: #555; }
+        .ss-main { min-width: 200px; }
+        .control-button { padding: 8px 15px; border: 1px solid #ccc; background-color: #fff; border-radius: 5px; cursor: pointer; height: 38px; transition: background-color 0.2s; }
+        .control-button:hover { background-color: #f0f0f0; }
+        #riceChart { width: 95%; height: 75vh; margin: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        #table-section { margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; }
+        #table-container { margin: 25px auto; width: 95%; }
+        table { width: 100%; border-collapse: collapse; background-color: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        th, td { padding: 12px 15px; border: 1px solid #ddd; text-align: left; font-size: 0.9em; }
+        th { background-color: #f8f9fa; font-weight: bold; }
+        #pagination-controls { text-align: center; margin-top: 15px; }
+        .page-btn { padding: 8px 12px; margin: 0 3px; background-color: #fff; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; }
+        .page-btn.active { background-color: #007bff; color: white; border-color: #007bff; }
+        #error-container { background-color: #ffdddd; border: 1px solid #f44336; color: #f44336; padding: 15px; margin: 20px auto; width: 90%; border-radius: 8px; }
+    </style>
+</head>
+<body>
+    <h1>Interactive RICE Chart</h1>
+    <div id="error-container" style="display:none;"></div>
+    <div class="controls">
+        <div id="chart-filters" class="filters"></div>
+        <button id="apply-chart-filters-btn" class="control-button">Apply Chart Filters</button>
+        <button id="reset-chart-btn" class="control-button">Reset Chart Filters</button>
+    </div>
+    <div id="riceChart"></div>
+
+    <div id="table-section">
+        <h2>Data Table</h2>
+        <div class="controls">
+            <div id="table-filters" class="filters"></div>
+            <button id="apply-table-filters-btn" class="control-button">Apply Table Filters</button>
+            <button id="reset-table-btn" class="control-button">Reset Table Filters</button>
+        </div>
+        <div id="table-container"></div>
+        <div id="pagination-controls"></div>
+    </div>
+
+    <script>
+        try {
+            const CSV_FILE_PATH = 'ideas_rice.csv';
+            const CHART_ELEMENT = document.getElementById('riceChart');
+            const TABLE_ROWS_PER_PAGE = 10;
+            
+            const CHART_FILTER_COLUMNS = [
+                { id: 'c-availability', name: 'Availability', label: 'Availability' },
+                { id: 'c-impact-scope', name: 'Impact Scope', label: 'Impact Scope' },
+                { id: 'c-value-direction', name: 'Value Direction', label: 'Value Direction' },
+                { id: 'c-okrs-impact', name: 'OKRs impact', label: 'OKRs Impact' }
+            ];
+            const TABLE_FILTER_COLUMNS = [
+                { id: 't-availability', name: 'Availability', label: 'Availability' },
+                { id: 't-impact-scope', name: 'Impact Scope', label: 'Impact Scope' },
+                { id: 't-value-direction', name: 'Value Direction', label: 'Value Direction' },
+                { id: 't-okrs-impact', name: 'OKRs impact', label: 'OKRs Impact' },
+                { id: 't-effort', name: 'Effort_2', label: 'Effort' },
+                { id: 't-reach', name: 'Reach_2', label: 'Reach' },
+                { id: 't-confidence', name: 'Confidence_2', label: 'Confidence' }
+            ];
+
+            let fullData = [];
+            window.chartFilterInstances = {};
+            window.tableFilterInstances = {};
+
+            function setupFilters(containerId, filterConfig, data, instanceStore) {
+                const filtersDiv = document.getElementById(containerId);
+                if (!filtersDiv) throw new Error(`Container #${containerId} not found.`);
+                
+                filterConfig.forEach(col => {
+                    const uniqueValues = [...new Set(data.map(row => (row[col.name] || '').toString().trim()))].filter(Boolean).sort();
+                    const filterGroup = document.createElement('div');
+                    filterGroup.className = 'filter-group';
+                    const label = document.createElement('label');
+                    label.setAttribute('for', `${col.id}-filter`);
+                    label.textContent = col.label;
+                    const select = document.createElement('select');
+                    select.id = `${col.id}-filter`;
+                    select.multiple = true;
+                    filterGroup.appendChild(label);
+                    filterGroup.appendChild(select);
+                    filtersDiv.appendChild(filterGroup);
+                    const slimData = uniqueValues.map(value => ({ text: value, value: value }));
+                    instanceStore[col.id] = new SlimSelect({ select: `#${col.id}-filter`, data: slimData, placeholder: 'Select Values', closeOnSelect: false });
+                });
+            }
+
+            // --- CHART FUNCTIONS (UPDATED WITH NEW COLORS AND OPACITY) ---
+            function drawBubbleChart(data) {
+                const confidenceColorMap = {
+                    'High': '#4E79A7',   // Actionable Blue
+                    'Medium': '#BAB0AC', // Neutral Grey
+                    'Low': '#F28E2B',    // Cautionary Orange
+                    'Not Set': '#E15759'   // Distinct Red for undefined/problematic data
+                };
+
+                const groupedData = {};
+                data.forEach(row => {
+                    const confidence = (row.Confidence_2 || 'Not Set').trim();
+                    if (!groupedData[confidence]) {
+                        groupedData[confidence] = [];
+                    }
+                    groupedData[confidence].push(row);
+                });
+                
+                const plotData = Object.keys(groupedData).map(confidenceLevel => {
+                    const points = groupedData[confidenceLevel];
+                    return {
+                        x: points.map(p => parseFloat(p.Effort_2)),
+                        y: points.map(p => parseFloat(p.Reach_2)),
+                        text: points.map(p => `<b>${p.Summary}</b><br><br>Effort: ${p.Effort_2}<br>Reach: ${p.Reach_2}<br>Impact: ${p.Impact_2}<br>Confidence: ${p.Confidence_2}`),
+                        mode: 'markers',
+                        marker: {
+                            size: points.map(p => parseFloat(p.Impact_2) * 15),
+                            color: confidenceColorMap[confidenceLevel] || '#cccccc',
+                            opacity: 0.7,
+                            sizemin: 5,
+                            sizemode: 'diameter'
+                        },
+                        name: confidenceLevel
+                    };
+                });
+
+                const layout = { title: 'RICE Model Idea Analysis', xaxis: { title: 'Effort' }, yaxis: { title: 'Reach' }, hovermode: 'closest', showlegend: true };
+                Plotly.react(CHART_ELEMENT, plotData, layout, {responsive: true});
+            }
+
+            function updateChart() {
+                let filteredData = [...fullData];
+                CHART_FILTER_COLUMNS.forEach(col => {
+                    const selectedValues = window.chartFilterInstances[col.id].getSelected();
+                    if (selectedValues && selectedValues.length > 0) {
+                        filteredData = filteredData.filter(row => selectedValues.includes((row[col.name] || '').toString().trim()));
+                    }
+                });
+                drawBubbleChart(filteredData);
+            }
+
+            // --- TABLE FUNCTIONS ---
+            function renderTable(data, page = 1) {
+                const tableContainer = document.getElementById('table-container');
+                const paginationControls = document.getElementById('pagination-controls');
+                tableContainer.innerHTML = '';
+                paginationControls.innerHTML = '';
+                if (!data || data.length === 0) { tableContainer.innerHTML = '<p style="text-align:center;">No data to display.</p>'; return; }
+                const start = (page - 1) * TABLE_ROWS_PER_PAGE;
+                const end = start + TABLE_ROWS_PER_PAGE;
+                const paginatedData = data.slice(start, end);
+                const table = document.createElement('table');
+                const thead = document.createElement('thead');
+                const tbody = document.createElement('tbody');
+                const headerRow = document.createElement('tr');
+                const headers = ['Key', 'Summary', 'Effort_2', 'Reach_2', 'Impact_2', 'Confidence_2', 'Availability', 'Impact Scope', 'Value Direction', 'OKRs impact'];
+                headers.forEach(h => { const th = document.createElement('th'); th.textContent = h; headerRow.appendChild(th); });
+                thead.appendChild(headerRow);
+                paginatedData.forEach(row => { const tr = document.createElement('tr'); headers.forEach(header => { const td = document.createElement('td'); td.textContent = row[header] || ''; tr.appendChild(td); }); tbody.appendChild(tr); });
+                table.appendChild(thead);
+                table.appendChild(tbody);
+                tableContainer.appendChild(table);
+                const totalPages = Math.ceil(data.length / TABLE_ROWS_PER_PAGE);
+                if (totalPages > 1) { for (let i = 1; i <= totalPages; i++) { const pageBtn = document.createElement('button'); pageBtn.textContent = i; pageBtn.className = 'page-btn' + (i === page ? ' active' : ''); pageBtn.addEventListener('click', () => renderTable(data, i)); paginationControls.appendChild(pageBtn); } }
+            }
+
+            function updateTable() {
+                let filteredData = [...fullData];
+                TABLE_FILTER_COLUMNS.forEach(col => {
+                    const selectedValues = window.tableFilterInstances[col.id].getSelected();
+                    if (selectedValues && selectedValues.length > 0) {
+                        filteredData = filteredData.filter(row => selectedValues.includes((row[col.name] || '').toString().trim()));
+                    }
+                });
+                renderTable(filteredData, 1);
+            }
+
+            // --- INITIALIZATION ---
+            Plotly.d3.csv(CSV_FILE_PATH, (error, data) => {
+                if (error) {
+                    throw new Error(`Could not load data from '${CSV_FILE_PATH}'. Original error: ${error.message}`);
+                }
+                fullData = data.filter(row => row.Summary && row.Summary.trim() !== '');
+                
+                setupFilters('chart-filters', CHART_FILTER_COLUMNS, fullData, window.chartFilterInstances);
+                drawBubbleChart(fullData);
+                document.getElementById('apply-chart-filters-btn').addEventListener('click', updateChart);
+                document.getElementById('reset-chart-btn').addEventListener('click', () => {
+                    CHART_FILTER_COLUMNS.forEach(col => window.chartFilterInstances[col.id].setSelected([]));
+                    updateChart();
+                });
+
+                setupFilters('table-filters', TABLE_FILTER_COLUMNS, fullData, window.tableFilterInstances);
+                renderTable(fullData, 1);
+                document.getElementById('apply-table-filters-btn').addEventListener('click', updateTable);
+                document.getElementById('reset-table-btn').addEventListener('click', () => {
+                    TABLE_FILTER_COLUMNS.forEach(col => window.tableFilterInstances[col.id].setSelected([]));
+                    updateTable();
+                });
+            });
+
+        } catch (e) {
+            const errorContainer = document.getElementById('error-container');
+            errorContainer.style.display = 'block';
+            errorContainer.innerHTML = `<h3>An unexpected error occurred:</h3><pre>${e.stack || e.message}</pre>`;
+        }
+    </script>
+</body>
+</html>
